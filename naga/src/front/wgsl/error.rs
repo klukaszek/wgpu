@@ -351,7 +351,7 @@ impl<'a> Error<'a> {
         writer.into_string()
     }
 
-    pub fn location(&self, source: &str) -> Option<SourceLocation> {
+    pub fn location(&self, _source: &str) -> Option<SourceLocation> {
         // For now, just return None (could be improved to extract from error variants)
         None
     }
@@ -710,7 +710,7 @@ impl From<ConflictingDiagnosticRuleError> for Error<'_> {
 
 /// Used for diagnostic refinement in [`Error::DiagnosticAttributeNotSupported`].
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum DiagnosticAttributeNotSupportedPosition {
+pub enum DiagnosticAttributeNotSupportedPosition {
     SemicolonInModulePosition,
     Other { display_plural: &'static str },
 }
@@ -722,7 +722,7 @@ impl From<&'static str> for DiagnosticAttributeNotSupportedPosition {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AutoConversionError {
+pub struct AutoConversionError {
     pub dest_span: Span,
     pub dest_type: String,
     pub source_span: Span,
@@ -730,7 +730,7 @@ pub(crate) struct AutoConversionError {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct AutoConversionLeafScalarError {
+pub struct AutoConversionLeafScalarError {
     pub dest_span: Span,
     pub dest_scalar: String,
     pub source_span: Span,
@@ -738,7 +738,7 @@ pub(crate) struct AutoConversionLeafScalarError {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ConcretizationFailedError {
+pub struct ConcretizationFailedError {
     pub expr_span: Span,
     pub expr_type: String,
     pub scalar: String,
@@ -1199,141 +1199,16 @@ impl<'a> Error<'a> {
                     notes,
                 }
             },
-            &Error::ReservedKeyword(name_span) => ParseError::Single {
-                message: format!("name `{}` is a reserved keyword", &source[name_span]),
-                labels: vec![(
-                    name_span,
-                    format!("definition of `{}`", &source[name_span]).into(),
-                )],
-                notes: vec![],
-            },
-            &Error::Redefinition { previous, current } => ParseError::Single {
-                message: format!("redefinition of `{}`", &source[current]),
-                labels: vec![
-                    (
-                        current,
-                        format!("redefinition of `{}`", &source[current]).into(),
-                    ),
-                    (
-                        previous,
-                        format!("previous definition of `{}`", &source[previous]).into(),
-                    ),
-                ],
-                notes: vec![],
-            },
-            &Error::RecursiveDeclaration { ident, usage } => ParseError::Single {
-                message: format!("declaration of `{}` is recursive", &source[ident]),
-                labels: vec![(ident, "".into()), (usage, "uses itself here".into())],
-                notes: vec![],
-            },
-            &Error::CyclicDeclaration { ident, ref path } => ParseError::Single {
-                message: format!("declaration of `{}` is cyclic", &source[ident]),
-                labels: path
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(i, &(ident, usage))| {
-                        [
-                            (ident, "".into()),
-                            (
-                                usage,
-                                if i == path.len() - 1 {
-                                    "ending the cycle".into()
-                                } else {
-                                    format!("uses `{}`", &source[ident]).into()
-                                },
-                            ),
-                        ]
-                    })
-                    .collect(),
-                notes: vec![],
-            },
-            &Error::InvalidSwitchSelector { span } => ParseError::Single {
-                message: "invalid `switch` selector".to_string(),
-                labels: vec![(
-                    span,
-                    "`switch` selector must be a scalar integer"
-                    .into(),
-                )],
-                notes: vec![],
-            },
-            &Error::InvalidSwitchCase { span } => ParseError::Single {
-                message: "invalid `switch` case selector value".to_string(),
-                labels: vec![(
-                    span,
-                    "`switch` case selector must be a scalar integer const expression"
-                    .into(),
-                )],
-                notes: vec![],
-            },
-            &Error::SwitchCaseTypeMismatch { span } => ParseError::Single {
-                message: "invalid `switch` case selector value".to_string(),
-                labels: vec![(
-                    span,
-                    "`switch` case selector must have the same type as the `switch` selector expression"
-                    .into(),
-                )],
-                notes: vec![],
-            },
-            &Error::CalledEntryPoint(span) => ParseError::Single {
-                message: "entry point cannot be called".to_string(),
-                labels: vec![(span, "entry point cannot be called".into())],
-                notes: vec![],
-            },
-            &Error::WrongArgumentCount {
-                span,
-                ref expected,
-                found,
-            } => ParseError::Single {
-                message: format!(
-                    "wrong number of arguments: expected {}, found {}",
-                    if expected.len() < 2 {
-                        format!("{}", expected.start)
-                    } else {
-                        format!("{}..{}", expected.start, expected.end)
-                    },
-                    found
-                ),
-                labels: vec![(span, "wrong number of arguments".into())],
-                notes: vec![],
-            },
-            &Error::TooManyArguments {
-                ref function,
-                call_span,
-                arg_span,
-                max_arguments,
-            } => ParseError::Single {
-                message: format!("too many arguments passed to `{function}`"),
-                labels: vec![
-                    (call_span, "".into()),
-                    (arg_span, format!("unexpected argument #{}", max_arguments + 1).into())
-                ],
-                notes: vec![
-                    format!("The `{function}` function accepts at most {max_arguments} argument(s)")
-                ],
-            },
-            &Error::WrongArgumentType {
-                ref function,
-                call_span,
-                arg_span,
-                arg_index,
-                ref arg_ty,
-                ref allowed,
-            } => {
-                let message = format!(
-                    "wrong type passed as argument #{} to `{function}`",
-                    arg_index + 1,
-                );
-                let labels = vec![
-                    (call_span, "".into()),
-                    (arg_span, format!("argument #{} has type `{arg_ty}`", arg_index + 1).into())
-                ];
 
-                let mut notes = vec![];
-                notes.push(format!("`{function}` accepts the following types for argument #{}:", arg_index + 1));
-                notes.extend(allowed.iter().map(|ty| format!("allowed type: {ty}")));
 
-                ParseError::Single { message, labels, notes }
-            },
+
+
+
+
+
+
+
+
             &Error::InconsistentArgumentType {
                 ref function,
                 call_span,

@@ -7,14 +7,14 @@ use crate::diagnostic_filter::{
     self, DiagnosticFilter, DiagnosticFilterMap, DiagnosticFilterNode, FilterableTriggeringRule,
     ShouldConflictOnFullDuplicate, StandardFilterableTriggeringRule,
 };
-use crate::front::SymbolTable;
 use crate::front::wgsl::error::{DiagnosticAttributeNotSupportedPosition, Error, ExpectedToken};
-use crate::front::wgsl::parse::directive::DirectiveKind;
 use crate::front::wgsl::parse::directive::enable_extension::{EnableExtension, EnableExtensions};
 use crate::front::wgsl::parse::directive::language_extension::LanguageExtension;
+use crate::front::wgsl::parse::directive::DirectiveKind;
 use crate::front::wgsl::parse::lexer::{Lexer, Token};
 use crate::front::wgsl::parse::number::Number;
 use crate::front::wgsl::{Result, Scalar};
+use crate::front::SymbolTable;
 use crate::{Arena, FastHashSet, FastIndexSet, Handle, ShaderStage, Span};
 
 pub mod ast;
@@ -3113,7 +3113,7 @@ impl Parser {
                         diagnostic_filters
                             .add(diagnostic_filter, span, ShouldConflictOnFullDuplicate::No)
                             .map_err(|e| vec![Box::new(e.into())])?;
-                        lexer
+                        let _ = lexer
                             .expect(Token::Separator(';'))
                             .map_err(|e| vec![Box::new(e)]);
                     }
@@ -3168,7 +3168,8 @@ impl Parser {
                 Err(error) => {
                     errors.push(error);
                     // Synchronize: skip tokens until next global item or EOF
-                    while let (token, _) = lexer.peek() {
+                    loop {
+                        let (token, _) = lexer.peek();
                         match token {
                             Token::Word("struct")
                             | Token::Word("fn")
@@ -3179,7 +3180,7 @@ impl Parser {
                             | Token::Word("const_assert")
                             | Token::End => break,
                             _ => {
-                                lexer.next();
+                                let _ = lexer.next();
                             }
                         }
                     }
@@ -3244,7 +3245,7 @@ impl Parser {
             {
                 FilterableTriggeringRule::Standard(triggering_rule)
             } else {
-                diagnostic_filter::Severity::Warning
+                let _ = diagnostic_filter::Severity::Warning
                     .report_wgsl_parse_diag(
                         Box::new(Error::UnknownDiagnosticRuleName(diagnostic_rule_name_span)),
                         lexer.source,
@@ -3258,7 +3259,7 @@ impl Parser {
             new_severity,
         };
         lexer.skip(Token::Separator(','));
-        lexer
+        let _ = lexer
             .expect(Token::Paren(')'))
             .map_err(|e| vec![Box::new(e)]);
 
