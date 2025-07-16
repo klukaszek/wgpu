@@ -10,7 +10,7 @@ pub struct ShaderError<E> {
 }
 
 #[cfg(feature = "wgsl-in")]
-impl fmt::Display for ShaderError<crate::front::wgsl::ParseError> {
+impl<'a> fmt::Display for ShaderError<crate::front::wgsl::ParseError<'a>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = self.label.as_deref().unwrap_or_default();
         let string = self.inner.emit_to_string(&self.source);

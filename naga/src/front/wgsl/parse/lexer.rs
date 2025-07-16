@@ -1,11 +1,12 @@
-use super::{number::consume_number, Error, ExpectedToken, Result};
+use super::{Error, ExpectedToken, Result, number::consume_number};
+use crate::Span;
+use crate::front::wgsl::Scalar;
 use crate::front::wgsl::error::NumberError;
 use crate::front::wgsl::parse::directive::enable_extension::EnableExtensions;
-use crate::front::wgsl::parse::{conv, Number};
-use crate::front::wgsl::Scalar;
-use crate::Span;
+use crate::front::wgsl::parse::{Number, conv};
 
 use alloc::{boxed::Box, vec::Vec};
+use std::vec;
 
 type TokenSpan<'a> = (Token<'a>, Span);
 
@@ -416,10 +417,10 @@ impl<'a> Lexer<'a> {
         if next.0 == expected {
             Ok(next.1)
         } else {
-            Err(Box::new(Error::Unexpected(
+            Err(vec![Box::new(Error::Unexpected(
                 next.1,
                 ExpectedToken::Token(expected),
-            )))
+            ))])
         }
     }
 
@@ -436,10 +437,10 @@ impl<'a> Lexer<'a> {
         if next.0 == Token::Paren(expected) {
             Ok(())
         } else {
-            Err(Box::new(Error::Unexpected(
+            Err(vec![Box::new(Error::Unexpected(
                 next.1,
                 ExpectedToken::Token(Token::Paren(expected)),
-            )))
+            ))])
         }
     }
 
@@ -461,27 +462,29 @@ impl<'a> Lexer<'a> {
     pub(in crate::front::wgsl) fn next_ident_with_span(&mut self) -> Result<'a, (&'a str, Span)> {
         match self.next() {
             (Token::Word(word), span) => Self::word_as_ident_with_span(word, span),
-            other => Err(Box::new(Error::Unexpected(
+            other => Err(vec![Box::new(Error::Unexpected(
                 other.1,
                 ExpectedToken::Identifier,
-            ))),
+            ))]),
         }
     }
 
     pub(in crate::front::wgsl) fn peek_ident_with_span(&mut self) -> Result<'a, (&'a str, Span)> {
         match self.peek() {
             (Token::Word(word), span) => Self::word_as_ident_with_span(word, span),
-            other => Err(Box::new(Error::Unexpected(
+            other => Err(vec![Box::new(Error::Unexpected(
                 other.1,
                 ExpectedToken::Identifier,
-            ))),
+            ))]),
         }
     }
 
     fn word_as_ident_with_span(word: &'a str, span: Span) -> Result<'a, (&'a str, Span)> {
         match word {
-            "_" => Err(Box::new(Error::InvalidIdentifierUnderscore(span))),
-            word if word.starts_with("__") => Err(Box::new(Error::ReservedIdentifierPrefix(span))),
+            "_" => Err(vec![Box::new(Error::InvalidIdentifierUnderscore(span))]),
+            word if word.starts_with("__") => {
+                Err(vec![Box::new(Error::ReservedIdentifierPrefix(span))])
+            }
             word => Ok((word, span)),
         }
     }
@@ -494,7 +497,7 @@ impl<'a> Lexer<'a> {
 
     fn word_as_ident(word: &'a str, span: Span) -> Result<'a, (&'a str, Span)> {
         if crate::keywords::wgsl::RESERVED.contains(&word) {
-            Err(Box::new(Error::ReservedKeyword(span)))
+            Err(vec![Box::new(Error::ReservedKeyword(span))])
         } else {
             Ok((word, span))
         }
@@ -505,11 +508,13 @@ impl<'a> Lexer<'a> {
         self.expect_generic_paren('<')?;
         let (scalar, _span) = match self.next() {
             (Token::Word(word), span) => {
-                conv::get_scalar_type(&self.enable_extensions, span, word)?
-                    .map(|scalar| (scalar, span))
-                    .ok_or(Error::UnknownScalarType(span))?
+                let scalar_opt = conv::get_scalar_type(&self.enable_extensions, span, word)?;
+                match scalar_opt {
+                    Some(scalar) => (scalar, span),
+                    None => return Err(vec![Box::new(Error::UnknownScalarType(span))]),
+                }
             }
-            (_, span) => return Err(Box::new(Error::UnknownScalarType(span))),
+            (_, span) => return Err(vec![Box::new(Error::UnknownScalarType(span))]),
         };
 
         self.expect_generic_paren('>')?;
@@ -526,11 +531,13 @@ impl<'a> Lexer<'a> {
 
         let (scalar, span) = match self.next() {
             (Token::Word(word), span) => {
-                conv::get_scalar_type(&self.enable_extensions, span, word)?
-                    .map(|scalar| (scalar, span))
-                    .ok_or(Error::UnknownScalarType(span))?
+                let scalar_opt = conv::get_scalar_type(&self.enable_extensions, span, word)?;
+                match scalar_opt {
+                    Some(scalar) => (scalar, span),
+                    None => return Err(vec![Box::new(Error::UnknownScalarType(span))]),
+                }
             }
-            (_, span) => return Err(Box::new(Error::UnknownScalarType(span))),
+            (_, span) => return Err(vec![Box::new(Error::UnknownScalarType(span))]),
         };
 
         self.expect_generic_paren('>')?;
@@ -548,7 +555,7 @@ impl<'a> Lexer<'a> {
             "atomic" => Ok(crate::StorageAccess::ATOMIC
                 | crate::StorageAccess::LOAD
                 | crate::StorageAccess::STORE),
-            _ => Err(Box::new(Error::UnknownAccess(span))),
+            _ => Err(vec![Box::new(Error::UnknownAccess(span))]),
         }
     }
 
@@ -571,7 +578,7 @@ impl<'a> Lexer<'a> {
                 let ret = if name == "vertex_return" {
                     true
                 } else {
-                    return Err(Box::new(Error::UnknownAttribute(span)));
+                    return Err(vec![Box::new(Error::UnknownAttribute(span))]);
                 };
                 self.skip(Token::Separator(','));
                 self.expect(Token::Paren('>'))?;

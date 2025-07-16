@@ -2,8 +2,10 @@
 //!
 //! The focal point of this module is the [`EnableExtension`] API.
 
-use crate::front::wgsl::{Error, Result};
+use std::vec;
+
 use crate::Span;
+use crate::front::wgsl::{Error, Result};
 
 use alloc::boxed::Box;
 
@@ -81,7 +83,7 @@ impl EnableExtension {
                 Self::Implemented(ImplementedEnableExtension::DualSourceBlending)
             }
             Self::SUBGROUPS => Self::Unimplemented(UnimplementedEnableExtension::Subgroups),
-            _ => return Err(Box::new(Error::UnknownEnableExtension(span, word))),
+            _ => return Err(vec![Box::new(Error::UnknownEnableExtension(span, word))]),
         })
     }
 

@@ -12,23 +12,24 @@ mod parse;
 mod tests;
 
 pub use crate::front::wgsl::error::ParseError;
+pub use crate::front::wgsl::parse::Options;
 pub use crate::front::wgsl::parse::directive::language_extension::{
     ImplementedLanguageExtension, LanguageExtension, UnimplementedLanguageExtension,
 };
-pub use crate::front::wgsl::parse::Options;
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use thiserror::Error;
 
+use crate::Scalar;
 use crate::front::wgsl::error::Error;
 use crate::front::wgsl::lower::Lowerer;
 use crate::front::wgsl::parse::Parser;
-use crate::Scalar;
 
 #[cfg(test)]
 use std::println;
 
-pub(crate) type Result<'a, T> = core::result::Result<T, Box<Error<'a>>>;
+pub(crate) type Result<'a, T> = core::result::Result<T, Vec<Box<Error<'a>>>>;
 
 pub struct Frontend {
     parser: Parser,
@@ -49,12 +50,21 @@ impl Frontend {
         }
     }
 
-    pub fn parse(&mut self, source: &str) -> core::result::Result<crate::Module, ParseError> {
-        self.inner(source).map_err(|x| x.as_parse_error(source))
+    pub fn parse<'a>(
+        &mut self,
+        source: &'a str,
+    ) -> core::result::Result<crate::Module, ParseError<'a>> {
+        self.inner(source).map_err(|errors| {
+            // Convert Vec<Box<Error>> to a single ParseError containing all errors
+            ParseError::Multiple(errors)
+        })
     }
 
     fn inner<'a>(&mut self, source: &'a str) -> Result<'a, crate::Module> {
-        let tu = self.parser.parse(source, &self.options)?;
+        let tu = match self.parser.parse(source, &self.options) {
+            Ok(tu) => tu,
+            Err(errors) => return Err(errors),
+        };
         let index = index::Index::generate(&tu)?;
         let module = Lowerer::new(&index).lower(tu)?;
 
@@ -73,8 +83,9 @@ impl Frontend {
 /// for this, particularly if calls to this method are exposed to user input.
 ///
 /// </div>
-pub fn parse_str(source: &str) -> core::result::Result<crate::Module, ParseError> {
-    Frontend::new().parse(source)
+pub fn parse_str(source: &str) -> core::result::Result<crate::Module, ParseError<'_>> {
+    let mut frontend = Frontend::new();
+    frontend.parse(source)
 }
 
 #[cfg(test)]

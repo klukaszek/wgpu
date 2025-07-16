@@ -1,12 +1,12 @@
 //! WGSL's automatic conversions for abstract types.
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, vec, vec::Vec};
 
 use crate::common::wgsl::{TryToWgsl, TypeContext};
+use crate::front::wgsl::Result;
 use crate::front::wgsl::error::{
     AutoConversionError, AutoConversionLeafScalarError, ConcretizationFailedError,
 };
-use crate::front::wgsl::Result;
 use crate::{Handle, Span};
 
 impl<'source> super::ExpressionContext<'source, '_, '_> {
@@ -57,14 +57,14 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
                     let source_type = self.type_resolution_to_string(expr_resolution);
                     let dest_type = self.type_resolution_to_string(goal_ty);
 
-                    return Err(Box::new(super::Error::AutoConversion(Box::new(
+                    return Err(vec![Box::new(super::Error::AutoConversion(Box::new(
                         AutoConversionError {
                             dest_span: goal_span,
                             dest_type,
                             source_span: expr_span,
                             source_type,
                         },
-                    ))));
+                    )))]);
                 }
             };
 
@@ -106,7 +106,7 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
 
         let expr_scalar = match expr_inner.automatically_convertible_scalar(&self.module.types) {
             Some(scalar) => scalar,
-            None => return Err(Box::new(make_error())),
+            None => return Err(vec![Box::new(make_error())]),
         };
 
         if expr_scalar == goal_scalar {
@@ -114,7 +114,7 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
         }
 
         if !expr_scalar.automatically_converts_to(goal_scalar) {
-            return Err(Box::new(make_error()));
+            return Err(vec![Box::new(make_error())]);
         }
 
         assert!(expr_scalar.is_abstract());
@@ -133,7 +133,10 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
             self.as_const_evaluator()
                 .cast_array(expr, goal_scalar, expr_span)
                 .map_err(|err| {
-                    Box::new(super::Error::ConstantEvaluatorError(err.into(), expr_span))
+                    vec![Box::new(super::Error::ConstantEvaluatorError(
+                        err.into(),
+                        expr_span,
+                    ))]
                 })
         } else {
             let cast = crate::Expression::As {
@@ -173,8 +176,8 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
         goal_scalar: crate::Scalar,
         goal_span: Span,
     ) -> Result<'source, ()> {
-        use crate::proc::TypeResolution as Tr;
         use crate::TypeInner as Ti;
+        use crate::proc::TypeResolution as Tr;
         let goal_scalar_res = Tr::Value(Ti::Scalar(goal_scalar));
 
         for (i, expr) in exprs.iter_mut().enumerate() {
@@ -197,9 +200,9 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
                 }
                 _ => {
                     let span = self.get_expression_span(*expr);
-                    return Err(Box::new(super::Error::InvalidConstructorComponentType(
-                        span, i as i32,
-                    )));
+                    return Err(vec![Box::new(
+                        super::Error::InvalidConstructorComponentType(span, i as i32),
+                    )]);
                 }
             }
         }
@@ -272,12 +275,14 @@ impl<'source> super::ExpressionContext<'source, '_, '_> {
                         // it has one. Also, avoid holding the borrow of `inner`
                         // across the call to `cast_array`.
                         let expr_type = &self.typifier()[expr];
-                        super::Error::ConcretizationFailed(Box::new(ConcretizationFailedError {
-                            expr_span,
-                            expr_type: self.type_resolution_to_string(expr_type),
-                            scalar: concretized.to_wgsl_for_diagnostics(),
-                            inner: err,
-                        }))
+                        vec![Box::new(super::Error::ConcretizationFailed(Box::new(
+                            ConcretizationFailedError {
+                                expr_span,
+                                expr_type: self.type_resolution_to_string(expr_type),
+                                scalar: concretized.to_wgsl_for_diagnostics(),
+                                inner: err,
+                            },
+                        )))]
                     })?;
             }
         }

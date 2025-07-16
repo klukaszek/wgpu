@@ -3,23 +3,24 @@ use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
+    vec,
     vec::Vec,
 };
 use core::num::NonZeroU32;
 
 use crate::common::ForDebugWithTypes;
+use crate::front::Typifier;
+use crate::front::wgsl::Result;
 use crate::front::wgsl::error::{Error, ExpectedToken, InvalidAssignmentType};
 use crate::front::wgsl::index::Index;
 use crate::front::wgsl::parse::number::Number;
 use crate::front::wgsl::parse::{ast, conv};
-use crate::front::wgsl::Result;
-use crate::front::Typifier;
+use crate::{Arena, FastHashMap, FastIndexMap, Handle, Span};
 use crate::{
     common::wgsl::{TryToWgsl, TypeContext},
     compact::KeepUnused,
 };
 use crate::{ir, proc};
-use crate::{Arena, FastHashMap, FastIndexMap, Handle, Span};
 
 mod construction;
 mod conversion;
@@ -525,7 +526,7 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
     ) -> Result<'source, Handle<ir::Expression>> {
         let mut eval = self.as_const_evaluator();
         eval.try_eval_and_append(expr, span)
-            .map_err(|e| Box::new(Error::ConstantEvaluatorError(e.into(), span)))
+            .map_err(|e| vec![Box::new(Error::ConstantEvaluatorError(e.into(), span))])
     }
 
     fn const_eval_expr_to_u32(
@@ -597,8 +598,10 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
             ExpressionContextType::Runtime(ref ctx) => Ok(ctx.local_table[local].runtime()),
             ExpressionContextType::Constant(Some(ref ctx)) => ctx.local_table[local]
                 .const_time()
-                .ok_or(Box::new(Error::UnexpectedOperationInConstContext(span))),
-            _ => Err(Box::new(Error::UnexpectedOperationInConstContext(span))),
+                .ok_or_else(|| vec![Box::new(Error::UnexpectedOperationInConstContext(span))]),
+            _ => Err(vec![Box::new(Error::UnexpectedOperationInConstContext(
+                span,
+            ))]),
         }
     }
 
@@ -609,7 +612,9 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
         match self.expr_type {
             ExpressionContextType::Runtime(ref mut ctx) => Ok(ctx),
             ExpressionContextType::Constant(_) | ExpressionContextType::Override => {
-                Err(Box::new(Error::UnexpectedOperationInConstContext(span)))
+                Err(vec![Box::new(Error::UnexpectedOperationInConstContext(
+                    span,
+                ))])
             }
         }
     }
@@ -623,31 +628,37 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
         match self.expr_type {
             ExpressionContextType::Runtime(ref rctx) => {
                 if !rctx.local_expression_kind_tracker.is_const(expr) {
-                    return Err(Box::new(Error::ExpectedConstExprConcreteIntegerScalar(
-                        component_span,
-                    )));
+                    return Err(vec![Box::new(
+                        Error::ExpectedConstExprConcreteIntegerScalar(component_span),
+                    )]);
                 }
 
                 let index = self
                     .module
                     .to_ctx()
                     .eval_expr_to_u32_from(expr, &rctx.function.expressions)
-                    .map_err(|err| match err {
-                        proc::U32EvalError::NonConst => {
-                            Error::ExpectedConstExprConcreteIntegerScalar(component_span)
-                        }
-                        proc::U32EvalError::Negative => Error::ExpectedNonNegative(component_span),
+                    .map_err(|err| {
+                        vec![Box::new(match err {
+                            proc::U32EvalError::NonConst => {
+                                Error::ExpectedConstExprConcreteIntegerScalar(component_span)
+                            }
+                            proc::U32EvalError::Negative => {
+                                Error::ExpectedNonNegative(component_span)
+                            }
+                        })]
                     })?;
                 ir::SwizzleComponent::XYZW
                     .get(index as usize)
                     .copied()
-                    .ok_or(Box::new(Error::InvalidGatherComponent(component_span)))
+                    .ok_or_else(|| vec![Box::new(Error::InvalidGatherComponent(component_span))])
             }
             // This means a `gather` operation appeared in a constant expression.
             // This error refers to the `gather` itself, not its "component" argument.
-            ExpressionContextType::Constant(_) | ExpressionContextType::Override => Err(Box::new(
-                Error::UnexpectedOperationInConstContext(gather_span),
-            )),
+            ExpressionContextType::Constant(_) | ExpressionContextType::Override => {
+                Err(vec![Box::new(Error::UnexpectedOperationInConstContext(
+                    gather_span,
+                ))])
+            }
         }
     }
 
@@ -723,7 +734,7 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
         };
         typifier
             .grow(handle, expressions, &resolve_ctx)
-            .map_err(Error::InvalidResolve)?;
+            .map_err(|e| vec![Box::new(Error::InvalidResolve(e))])?;
 
         Ok(self)
     }
@@ -735,7 +746,7 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
     ) -> Result<'source, (ir::ImageClass, bool)> {
         match *resolve_inner!(self, image) {
             ir::TypeInner::Image { class, arrayed, .. } => Ok((class, arrayed)),
-            _ => Err(Box::new(Error::BadTexture(span))),
+            _ => Err(vec![Box::new(Error::BadTexture(span))]),
         }
     }
 
@@ -861,11 +872,11 @@ impl<'source> ArgumentContext<'_, 'source> {
         if self.args.len() == 0 {
             Ok(())
         } else {
-            Err(Box::new(Error::WrongArgumentCount {
+            Err(vec![Box::new(Error::WrongArgumentCount {
                 found: self.total_args,
                 expected: self.min_args..self.args_used + 1,
                 span: self.span,
-            }))
+            })])
         }
     }
 
@@ -875,11 +886,11 @@ impl<'source> ArgumentContext<'_, 'source> {
                 self.args_used += 1;
                 Ok(arg)
             }
-            None => Err(Box::new(Error::WrongArgumentCount {
+            None => Err(vec![Box::new(Error::WrongArgumentCount {
                 found: self.total_args,
                 expected: self.min_args..self.args_used + 1,
                 span: self.span,
-            })),
+            })]),
         }
     }
 }
@@ -983,10 +994,13 @@ impl Components {
     }
 
     fn single_component(name: &str, name_span: Span) -> Result<u32> {
-        let ch = name.chars().next().ok_or(Error::BadAccessor(name_span))?;
+        let ch = name
+            .chars()
+            .next()
+            .ok_or_else(|| vec![Box::new(Error::BadAccessor(name_span))])?;
         match Self::letter_component(ch) {
             Some(sc) => Ok(sc as u32),
-            None => Err(Box::new(Error::BadAccessor(name_span))),
+            None => Err(vec![Box::new(Error::BadAccessor(name_span))]),
         }
     }
 
@@ -999,12 +1013,13 @@ impl Components {
             2 => ir::VectorSize::Bi,
             3 => ir::VectorSize::Tri,
             4 => ir::VectorSize::Quad,
-            _ => return Err(Box::new(Error::BadAccessor(name_span))),
+            _ => return Err(vec![Box::new(Error::BadAccessor(name_span))]),
         };
 
         let mut pattern = [ir::SwizzleComponent::X; 4];
         for (comp, ch) in pattern.iter_mut().zip(name.chars()) {
-            *comp = Self::letter_component(ch).ok_or(Error::BadAccessor(name_span))?;
+            *comp = Self::letter_component(ch)
+                .ok_or_else(|| vec![Box::new(Error::BadAccessor(name_span))])?;
         }
 
         if name.chars().all(|c| matches!(c, 'x' | 'y' | 'z' | 'w'))
@@ -1012,7 +1027,7 @@ impl Components {
         {
             Ok(Components::Swizzle { size, pattern })
         } else {
-            Err(Box::new(Error::BadAccessor(name_span)))
+            Err(vec![Box::new(Error::BadAccessor(name_span))])
         }
     }
 }
@@ -1273,14 +1288,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         o.id.map(|id| self.const_u32(id, &mut ctx.as_const()))
                             .transpose()?;
 
-                    let id = if let Some((id, id_span)) = id {
-                        Some(
-                            u16::try_from(id)
-                                .map_err(|_| Error::PipelineConstantIDValue(id_span))?,
-                        )
-                    } else {
-                        None
-                    };
+                    let id =
+                        if let Some((id, id_span)) = id {
+                            Some(u16::try_from(id).map_err(|_| {
+                                vec![Box::new(Error::PipelineConstantIDValue(id_span))]
+                            })?)
+                        } else {
+                            None
+                        };
 
                     let handle = ctx.module.overrides.append(
                         ir::Override {
@@ -1328,8 +1343,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         .eval_expr_to_bool_from(condition, &ctx.module.global_expressions)
                     {
                         Some(true) => Ok(()),
-                        Some(false) => Err(Error::ConstAssertFailed(span)),
-                        _ => Err(Error::NotBool(span)),
+                        Some(false) => Err(vec![Box::new(Error::ConstAssertFailed(span))]),
+                        _ => Err(vec![Box::new(Error::NotBool(span))]),
                     }?;
                 }
             }
@@ -1360,13 +1375,18 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let ty_res = proc::TypeResolution::Handle(explicit_ty);
                 let init = ectx
                     .try_automatic_conversions(init, &ty_res, name.span)
-                    .map_err(|error| match *error {
-                        Error::AutoConversion(e) => Box::new(Error::InitializationTypeMismatch {
-                            name: name.span,
-                            expected: e.dest_type,
-                            got: e.source_type,
-                        }),
-                        _ => error,
+                    .map_err(|error| match error.first() {
+                        Some(e) => match **e {
+                            Error::AutoConversion(ref auto_err) => {
+                                vec![Box::new(Error::InitializationTypeMismatch {
+                                    name: name.span,
+                                    expected: auto_err.dest_type.clone(),
+                                    got: auto_err.source_type.clone(),
+                                })]
+                            }
+                            _ => error,
+                        },
+                        None => error,
                     })?;
 
                 let init_ty = ectx.register_type(init)?;
@@ -1374,11 +1394,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     &proc::TypeResolution::Handle(explicit_ty),
                     &proc::TypeResolution::Handle(init_ty),
                 ) {
-                    return Err(Box::new(Error::InitializationTypeMismatch {
+                    return Err(vec![Box::new(Error::InitializationTypeMismatch {
                         name: name.span,
                         expected: ectx.type_to_string(explicit_ty),
                         got: ectx.type_to_string(init_ty),
-                    }));
+                    })]);
                 }
                 ty = explicit_ty;
                 initializer = Some(init);
@@ -1395,7 +1415,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ty = explicit_ty;
                 initializer = None;
             }
-            (None, None) => return Err(Box::new(Error::DeclMissingTypeAndInit(name.span))),
+            (None, None) => return Err(vec![Box::new(Error::DeclMissingTypeAndInit(name.span))]),
         }
         Ok((ty, initializer))
     }
@@ -1490,7 +1510,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 workgroup_size_out[i] = value.0;
                             }
                             Err(err) => {
-                                if let Error::ConstantEvaluatorError(ref ty, _) = *err {
+                                if let Error::ConstantEvaluatorError(ref ty, _) =
+                                    **err.first().unwrap()
+                                {
                                     match **ty {
                                         proc::ConstantEvaluatorError::OverrideExpr => {
                                             workgroup_size_overrides_out[i] =
@@ -1549,9 +1571,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let expr = self.expression(size_expr, ctx)?;
         match resolve_inner!(ctx, expr).scalar_kind().ok_or(0) {
             Ok(ir::ScalarKind::Sint) | Ok(ir::ScalarKind::Uint) => Ok(expr),
-            _ => Err(Box::new(Error::ExpectedConstExprConcreteIntegerScalar(
-                span,
-            ))),
+            _ => Err(vec![Box::new(
+                Error::ExpectedConstExprConcreteIntegerScalar(span),
+            )]),
         }
     }
 
@@ -1760,8 +1782,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 ir::Scalar::I32 | ir::Scalar::U32 | ir::Scalar::ABSTRACT_INT,
                             ) => Ok((expr, span)),
                             _ => match i {
-                                0 => Err(Box::new(Error::InvalidSwitchSelector { span })),
-                                _ => Err(Box::new(Error::InvalidSwitchCase { span })),
+                                0 => Err(vec![Box::new(Error::InvalidSwitchSelector { span })]),
+                                _ => Err(vec![Box::new(Error::InvalidSwitchCase { span })]),
                             },
                         }
                     })
@@ -1769,8 +1791,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                 let mut consensus =
                     ectx.automatic_conversion_consensus(&exprs)
-                        .map_err(|span_idx| Error::SwitchCaseTypeMismatch {
-                            span: spans[span_idx],
+                        .map_err(|span_idx| {
+                            vec![Box::new(Error::SwitchCaseTypeMismatch {
+                                span: spans[span_idx],
+                            })]
                         })?;
                 // Concretize to I32 if the selector and all cases were abstract
                 if consensus == ir::Scalar::ABSTRACT_INT {
@@ -1809,9 +1833,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                             ir::SwitchValue::U32(value)
                                         }
                                         _ => {
-                                            return Err(Box::new(Error::InvalidSwitchCase {
+                                            return Err(vec![Box::new(Error::InvalidSwitchCase {
                                                 span,
-                                            }));
+                                            })]);
                                         }
                                     }
                                 }
@@ -1909,10 +1933,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     Typed::Reference(handle) => handle,
                     Typed::Plain(handle) => {
                         let ty = ctx.invalid_assignment_type(handle);
-                        return Err(Box::new(Error::InvalidAssignment {
+                        return Err(vec![Box::new(Error::InvalidAssignment {
                             span: target_span,
                             ty,
-                        }));
+                        })]);
                     }
                 };
 
@@ -1976,7 +2000,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let target_handle = match target {
                     Typed::Reference(handle) => handle,
                     Typed::Plain(_) => {
-                        return Err(Box::new(Error::BadIncrDecrReferenceType(value_span)))
+                        return Err(vec![Box::new(Error::BadIncrDecrReferenceType(value_span))]);
                     }
                 };
 
@@ -1987,14 +2011,20 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     } => scalar,
                     ir::TypeInner::Pointer { base, .. } => match ectx.module.types[base].inner {
                         ir::TypeInner::Scalar(scalar) => scalar,
-                        _ => return Err(Box::new(Error::BadIncrDecrReferenceType(value_span))),
+                        _ => {
+                            return Err(vec![Box::new(Error::BadIncrDecrReferenceType(
+                                value_span,
+                            ))]);
+                        }
                     },
-                    _ => return Err(Box::new(Error::BadIncrDecrReferenceType(value_span))),
+                    _ => return Err(vec![Box::new(Error::BadIncrDecrReferenceType(value_span))]),
                 };
                 let literal = match scalar.kind {
                     ir::ScalarKind::Sint | ir::ScalarKind::Uint => ir::Literal::one(scalar)
-                        .ok_or(Error::BadIncrDecrReferenceType(value_span))?,
-                    _ => return Err(Box::new(Error::BadIncrDecrReferenceType(value_span))),
+                        .ok_or_else(|| {
+                            vec![Box::new(Error::BadIncrDecrReferenceType(value_span))]
+                        })?,
+                    _ => return Err(vec![Box::new(Error::BadIncrDecrReferenceType(value_span))]),
                 };
 
                 let right =
@@ -2035,8 +2065,8 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     .eval_expr_to_bool_from(condition, &ctx.function.expressions)
                 {
                     Some(true) => Ok(()),
-                    Some(false) => Err(Error::ConstAssertFailed(span)),
-                    _ => Err(Error::NotBool(span)),
+                    Some(false) => Err(vec![Box::new(Error::ConstAssertFailed(span))]),
+                    _ => Err(vec![Box::new(Error::NotBool(span))]),
                 }?;
 
                 block.extend(emitter.finish(&ctx.function.expressions));
@@ -2130,7 +2160,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let global = ctx
                     .globals
                     .get(name)
-                    .ok_or(Error::UnknownIdent(span, name))?;
+                    .ok_or_else(|| vec![Box::new(Error::UnknownIdent(span, name))])?;
                 let expr = match *global {
                     LoweredGlobalDecl::Var(handle) => {
                         let expr = ir::Expression::GlobalVariable(handle);
@@ -2148,7 +2178,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     LoweredGlobalDecl::Function { .. }
                     | LoweredGlobalDecl::Type(_)
                     | LoweredGlobalDecl::EntryPoint(_) => {
-                        return Err(Box::new(Error::Unexpected(span, ExpectedToken::Variable)));
+                        return Err(vec![Box::new(Error::Unexpected(
+                            span,
+                            ExpectedToken::Variable,
+                        ))]);
                     }
                 };
 
@@ -2180,9 +2213,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                     *ty.inner_with(&ctx.module.types),
                                     ir::TypeInner::Vector { .. },
                                 ) {
-                                    return Err(Box::new(Error::InvalidAddrOfOperand(
+                                    return Err(vec![Box::new(Error::InvalidAddrOfOperand(
                                         ctx.get_expression_span(handle),
-                                    )));
+                                    ))]);
                                 }
                             }
                         }
@@ -2190,10 +2223,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         return Ok(Typed::Plain(handle));
                     }
                     Typed::Plain(_) => {
-                        return Err(Box::new(Error::NotReference(
+                        return Err(vec![Box::new(Error::NotReference(
                             "the operand of the `&` operator",
                             span,
-                        )));
+                        ))]);
                     }
                 }
             }
@@ -2202,7 +2235,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let pointer = self.expression(expr, ctx)?;
 
                 if resolve_inner!(ctx, pointer).pointer_space().is_none() {
-                    return Err(Box::new(Error::NotPointer(span)));
+                    return Err(vec![Box::new(Error::NotPointer(span))]);
                 }
 
                 // No code is generated. We just declare the pointer a reference now.
@@ -2217,7 +2250,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             } => {
                 let handle = self
                     .call(span, function, arguments, ctx, false)?
-                    .ok_or(Error::FunctionReturnsVoid(function.span))?;
+                    .ok_or_else(|| vec![Box::new(Error::FunctionReturnsVoid(function.span))])?;
                 return Ok(Typed::Plain(handle));
             }
             ast::Expression::Index { base, index } => {
@@ -2232,18 +2265,24 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     }
                 }
 
-                lowered_base.try_map(|base| match ctx.const_eval_expr_to_u32(index).ok() {
-                    Some(index) => Ok::<_, Box<Error>>(ir::Expression::AccessIndex { base, index }),
+                match ctx.const_eval_expr_to_u32(index).ok() {
+                    Some(index) => {
+                        lowered_base.map(|base| ir::Expression::AccessIndex { base, index })
+                    }
                     None => {
                         // When an abstract array value e is indexed by an expression
                         // that is not a const-expression, then the array is concretized
                         // before the index is applied.
                         // https://www.w3.org/TR/WGSL/#array-access-expr
                         // Also applies to vectors and matrices.
-                        let base = ctx.concretize(base)?;
-                        Ok(ir::Expression::Access { base, index })
+                        let base = match lowered_base {
+                            Typed::Reference(handle) | Typed::Plain(handle) => {
+                                ctx.concretize(handle)?
+                            }
+                        };
+                        lowered_base.map(|_| ir::Expression::Access { base, index })
                     }
-                })?
+                }
             }
             ast::Expression::Member { base, ref field } => {
                 let mut lowered_base = self.expression_for_reference(base, ctx)?;
@@ -2275,7 +2314,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         let index = members
                             .iter()
                             .position(|m| m.name.as_deref() == Some(field.name))
-                            .ok_or(Error::BadAccessor(field.span))?
+                            .ok_or_else(|| vec![Box::new(Error::BadAccessor(field.span))])?
                             as u32;
 
                         lowered_base.map(|base| ir::Expression::AccessIndex { base, index })
@@ -2294,7 +2333,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             }
                         }
                     }
-                    _ => return Err(Box::new(Error::BadAccessor(field.span))),
+                    _ => return Err(vec![Box::new(Error::BadAccessor(field.span))]),
                 };
 
                 access
@@ -2308,11 +2347,11 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     ir::TypeInner::Vector { scalar, .. } => scalar,
                     _ => {
                         let ty = resolve!(ctx, expr);
-                        return Err(Box::new(Error::BadTypeCast {
+                        return Err(vec![Box::new(Error::BadTypeCast {
                             from_type: ctx.type_resolution_to_string(ty),
                             span: ty_span,
                             to_type: ctx.type_to_string(to_resolved),
-                        }));
+                        })]);
                     }
                 };
 
@@ -2430,12 +2469,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 &LoweredGlobalDecl::Const(_)
                 | &LoweredGlobalDecl::Override(_)
                 | &LoweredGlobalDecl::Var(_),
-            ) => Err(Box::new(Error::Unexpected(
+            ) => Err(vec![Box::new(Error::Unexpected(
                 function_span,
                 ExpectedToken::Function,
-            ))),
+            ))]),
             Some(&LoweredGlobalDecl::EntryPoint(_)) => {
-                Err(Box::new(Error::CalledEntryPoint(function_span)))
+                Err(vec![Box::new(Error::CalledEntryPoint(function_span))])
             }
             Some(&LoweredGlobalDecl::Function {
                 handle: function,
@@ -2467,7 +2506,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let has_result = ctx.module.functions[function].result.is_some();
 
                 if must_use && is_statement {
-                    return Err(Box::new(Error::FunctionMustUseUnused(function_span)));
+                    return Err(vec![Box::new(Error::FunctionMustUseUnused(function_span))]);
                 }
 
                 let rctx = ctx.runtime_expression_ctx(span)?;
@@ -2576,10 +2615,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 {
                                     let (arg_span, arg_type) =
                                         diagnostic_details(ctx, value_ty_res, orig_value);
-                                    return Err(Box::new(Error::SelectUnexpectedArgumentType {
-                                        arg_span,
-                                        arg_type,
-                                    }));
+                                    return Err(vec![Box::new(
+                                        Error::SelectUnexpectedArgumentType { arg_span, arg_type },
+                                    )]);
                                 }
                             }
                             let mut consensus_scalar = ctx
@@ -2593,12 +2631,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                                 diagnostic_details(ctx, ty_res, orig_expr)
                                             },
                                         );
-                                    Error::SelectRejectAndAcceptHaveNoCommonType {
+                                    vec![Box::new(Error::SelectRejectAndAcceptHaveNoCommonType {
                                         reject_span,
                                         reject_type,
                                         accept_span,
                                         accept_type,
-                                    }
+                                    })]
                                 })?;
                             if !ctx.is_const(condition) {
                                 consensus_scalar = consensus_scalar.concretize();
@@ -2667,9 +2705,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                     comparison: true,
                                 },
                                 _ => {
-                                    return Err(Box::new(Error::InvalidAtomicOperandType(
+                                    return Err(vec![Box::new(Error::InvalidAtomicOperandType(
                                         value_span,
-                                    )))
+                                    ))]);
                                 }
                             };
 
@@ -2778,7 +2816,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                                 ref other => {
                                     log::error!("Type {other:?} passed to workgroupUniformLoad");
                                     let span = ctx.ast_expressions.get_span(expr);
-                                    return Err(Box::new(Error::InvalidWorkGroupUniformLoad(span)));
+                                    return Err(vec![Box::new(
+                                        Error::InvalidWorkGroupUniformLoad(span),
+                                    )]);
                                 }
                             };
                             let result = ctx.interrupt_emitter(
@@ -2812,7 +2852,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             let scalar = if let ir::ImageClass::Storage { format, .. } = class {
                                 format.into()
                             } else {
-                                return Err(Box::new(Error::NotStorageTexture(image_span)));
+                                return Err(vec![Box::new(Error::NotStorageTexture(image_span))]);
                             };
 
                             let value =
@@ -3131,7 +3171,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             return Ok(Some(result));
                         }
                         _ => {
-                            return Err(Box::new(Error::UnknownIdent(function.span, function.name)))
+                            return Err(vec![Box::new(Error::UnknownIdent(
+                                function.span,
+                                function.name,
+                            ))]);
                         }
                     }
                 };
@@ -3212,19 +3255,19 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
         let min_arguments = remaining_overloads.min_arguments();
         let max_arguments = remaining_overloads.max_arguments();
         if arguments.len() < min_arguments {
-            return Err(Box::new(Error::WrongArgumentCount {
+            return Err(vec![Box::new(Error::WrongArgumentCount {
                 span,
                 expected: min_arguments as u32..max_arguments as u32,
                 found: arguments.len() as u32,
-            }));
+            })]);
         }
         if arguments.len() > max_arguments {
-            return Err(Box::new(Error::TooManyArguments {
+            return Err(vec![Box::new(Error::TooManyArguments {
                 function: fun.to_wgsl_for_diagnostics(),
                 call_span: span,
                 arg_span: ctx.get_expression_span(arguments[max_arguments]),
                 max_arguments: max_arguments as _,
-            }));
+            })]);
         }
 
         log::debug!(
@@ -3286,14 +3329,14 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
 
                     // Some overloads of `fun` do accept this many arguments,
                     // but none accept one of this type.
-                    return Err(Box::new(Error::WrongArgumentType {
+                    return Err(vec![Box::new(Error::WrongArgumentType {
                         function,
                         call_span,
                         arg_span,
                         arg_index: arg_index as u32,
                         arg_ty,
                         allowed,
-                    }));
+                    })]);
                 }
 
                 // This argument's type is accepted by some overloads---just
@@ -3337,7 +3380,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         }
 
                         // Report `arg`'s type as inconsistent with `prior_expr`'s
-                        return Err(Box::new(Error::InconsistentArgumentType {
+                        return Err(vec![Box::new(Error::InconsistentArgumentType {
                             function,
                             call_span,
                             arg_span,
@@ -3347,7 +3390,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                             inconsistent_index: prior_index as u32,
                             inconsistent_ty,
                             allowed,
-                        }));
+                        })]);
                     }
                 }
                 unreachable!("Failed to eliminate argument type when re-tried");
@@ -3401,12 +3444,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ir::TypeInner::Atomic(scalar) => Ok((pointer, scalar)),
                 ref other => {
                     log::error!("Pointer type to {:?} passed to atomic op", other);
-                    Err(Box::new(Error::InvalidAtomicPointer(span)))
+                    Err(vec![Box::new(Error::InvalidAtomicPointer(span))])
                 }
             },
             ref other => {
                 log::error!("Type {:?} passed to atomic op", other);
-                Err(Box::new(Error::InvalidAtomicPointer(span)))
+                Err(vec![Box::new(Error::InvalidAtomicPointer(span))])
             }
         }
     }
@@ -3717,7 +3760,10 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             let member_size = if let Some(size_expr) = member.size {
                 let (size, span) = self.const_u32(size_expr, &mut ctx.as_const())?;
                 if size < member_min_size {
-                    return Err(Box::new(Error::SizeAttributeTooLow(span, member_min_size)));
+                    return Err(vec![Box::new(Error::SizeAttributeTooLow(
+                        span,
+                        member_min_size,
+                    ))]);
                 } else {
                     size
                 }
@@ -3729,15 +3775,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let (align, span) = self.const_u32(align_expr, &mut ctx.as_const())?;
                 if let Some(alignment) = proc::Alignment::new(align) {
                     if alignment < member_min_alignment {
-                        return Err(Box::new(Error::AlignAttributeTooLow(
+                        return Err(vec![Box::new(Error::AlignAttributeTooLow(
                             span,
                             member_min_alignment,
-                        )));
+                        ))]);
                     } else {
                         alignment
                     }
                 } else {
-                    return Err(Box::new(Error::NonPowerOfTwoAlignAttribute(span)));
+                    return Err(vec![Box::new(Error::NonPowerOfTwoAlignAttribute(span))]);
                 }
             } else {
                 member_min_alignment
@@ -3794,14 +3840,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
     ) -> Result<'source, (u32, Span)> {
         let span = ctx.ast_expressions.get_span(expr);
         let expr = self.expression(expr, ctx)?;
-        let value = ctx
-            .module
-            .to_ctx()
-            .eval_expr_to_u32(expr)
-            .map_err(|err| match err {
+        let value = ctx.module.to_ctx().eval_expr_to_u32(expr).map_err(|err| {
+            vec![Box::new(match err {
                 proc::U32EvalError::NonConst => Error::ExpectedConstExprConcreteIntegerScalar(span),
                 proc::U32EvalError::Negative => Error::ExpectedNonNegative(span),
-            })?;
+            })]
+        })?;
         Ok((value, span))
     }
 
@@ -3817,35 +3861,40 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 match const_expr {
                     Ok(value) => {
                         let len = ctx.const_eval_expr_to_u32(value).map_err(|err| {
-                            Box::new(match err {
+                            vec![Box::new(match err {
                                 proc::U32EvalError::NonConst => {
                                     Error::ExpectedConstExprConcreteIntegerScalar(span)
                                 }
                                 proc::U32EvalError::Negative => {
                                     Error::ExpectedPositiveArrayLength(span)
                                 }
-                            })
+                            })]
                         })?;
-                        let size =
-                            NonZeroU32::new(len).ok_or(Error::ExpectedPositiveArrayLength(span))?;
+                        let size = NonZeroU32::new(len).ok_or_else(|| {
+                            vec![Box::new(Error::ExpectedPositiveArrayLength(span))]
+                        })?;
                         ir::ArraySize::Constant(size)
                     }
-                    Err(err) => {
-                        if let Error::ConstantEvaluatorError(ref ty, _) = *err {
-                            match **ty {
-                                proc::ConstantEvaluatorError::OverrideExpr => {
-                                    ir::ArraySize::Pending(self.array_size_override(
-                                        expr,
-                                        &mut ctx.as_global().as_override(),
-                                        span,
-                                    )?)
+                    Err(errors) => {
+                        if let Some(first_error) = errors.first() {
+                            if let Error::ConstantEvaluatorError(ref ty, _) = **first_error {
+                                match **ty {
+                                    proc::ConstantEvaluatorError::OverrideExpr => {
+                                        ir::ArraySize::Pending(self.array_size_override(
+                                            expr,
+                                            &mut ctx.as_global().as_override(),
+                                            span,
+                                        )?)
+                                    }
+                                    _ => {
+                                        return Err(errors);
+                                    }
                                 }
-                                _ => {
-                                    return Err(err);
-                                }
+                            } else {
+                                return Err(errors);
                             }
                         } else {
-                            return Err(err);
+                            return Err(errors);
                         }
                     }
                 }
@@ -3878,9 +3927,9 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     )
                 }
             }),
-            _ => Err(Box::new(Error::ExpectedConstExprConcreteIntegerScalar(
-                span,
-            ))),
+            _ => Err(vec![Box::new(
+                Error::ExpectedConstExprConcreteIntegerScalar(span),
+            )]),
         }
     }
 
@@ -3905,7 +3954,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let ty = self.resolve_ast_type(ty, ctx)?;
                 let scalar = match ctx.module.types[ty].inner {
                     ir::TypeInner::Scalar(sc) => sc,
-                    _ => return Err(Box::new(Error::UnknownScalarType(ty_span))),
+                    _ => return Err(vec![Box::new(Error::UnknownScalarType(ty_span))]),
                 };
                 ir::TypeInner::Vector { size, scalar }
             }
@@ -3918,7 +3967,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 let ty = self.resolve_ast_type(ty, ctx)?;
                 let scalar = match ctx.module.types[ty].inner {
                     ir::TypeInner::Scalar(sc) => sc,
-                    _ => return Err(Box::new(Error::UnknownScalarType(ty_span))),
+                    _ => return Err(vec![Box::new(Error::UnknownScalarType(ty_span))]),
                 };
                 match scalar.kind {
                     ir::ScalarKind::Float => ir::TypeInner::Matrix {
@@ -3926,7 +3975,7 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         rows,
                         scalar,
                     },
-                    _ => return Err(Box::new(Error::BadMatrixScalarKind(ty_span, scalar))),
+                    _ => return Err(vec![Box::new(Error::BadMatrixScalarKind(ty_span, scalar))]),
                 }
             }
             ast::Type::Atomic(scalar) => scalar.to_inner_atomic(),
@@ -3971,9 +4020,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             ast::Type::User(ref ident) => {
                 return match ctx.globals.get(ident.name) {
                     Some(&LoweredGlobalDecl::Type(handle)) => Ok(handle),
-                    Some(_) => Err(Box::new(Error::Unexpected(ident.span, ExpectedToken::Type))),
-                    None => Err(Box::new(Error::UnknownType(ident.span))),
-                }
+                    Some(_) => Err(vec![Box::new(Error::Unexpected(
+                        ident.span,
+                        ExpectedToken::Type,
+                    ))]),
+                    None => Err(vec![Box::new(Error::UnknownType(ident.span))]),
+                };
             }
         };
 
@@ -4035,12 +4087,12 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                 ir::TypeInner::RayQuery { .. } => Ok(pointer),
                 ref other => {
                     log::error!("Pointer type to {:?} passed to ray query op", other);
-                    Err(Box::new(Error::InvalidRayQueryPointer(span)))
+                    Err(vec![Box::new(Error::InvalidRayQueryPointer(span))])
                 }
             },
             ref other => {
                 log::error!("Type {:?} passed to ray query op", other);
-                Err(Box::new(Error::InvalidRayQueryPointer(span)))
+                Err(vec![Box::new(Error::InvalidRayQueryPointer(span))])
             }
         }
     }

@@ -188,7 +188,7 @@ impl<'source> Lowerer<'source, '_> {
                 Constructor::PartialMatrix { .. } | Constructor::PartialArray => {
                     // We have no arguments from which to infer the result type, so
                     // partial constructors aren't acceptable here.
-                    return Err(Box::new(Error::TypeNotInferable(ty_span)));
+                    return Err(vec![Box::new(Error::TypeNotInferable(ty_span))]);
                 }
             },
 
@@ -341,7 +341,10 @@ impl<'source> Lowerer<'source, '_> {
                 let consensus_scalar =
                     ctx.automatic_conversion_consensus(&components)
                         .map_err(|index| {
-                            Error::InvalidConstructorComponentType(spans[index], index as i32)
+                            vec![Box::new(Error::InvalidConstructorComponentType(
+                                spans[index],
+                                index as i32,
+                            ))]
                         })?;
                 ctx.convert_slice_to_common_leaf_scalar(&mut components, consensus_scalar)?;
                 let inner = consensus_scalar.to_inner_vector(size);
@@ -369,7 +372,10 @@ impl<'source> Lowerer<'source, '_> {
                 let consensus_scalar =
                     ctx.automatic_conversion_consensus(&components)
                         .map_err(|index| {
-                            Error::InvalidConstructorComponentType(spans[index], index as i32)
+                            vec![Box::new(Error::InvalidConstructorComponentType(
+                                spans[index],
+                                index as i32,
+                            ))]
                         })?;
                 // We actually only accept floating-point elements.
                 let consensus_scalar = consensus_scalar
@@ -447,7 +453,10 @@ impl<'source> Lowerer<'source, '_> {
                 let consensus_scalar =
                     ctx.automatic_conversion_consensus(&components)
                         .map_err(|index| {
-                            Error::InvalidConstructorComponentType(spans[index], index as i32)
+                            vec![Box::new(Error::InvalidConstructorComponentType(
+                                spans[index],
+                                index as i32,
+                            ))]
                         })?;
                 ctx.convert_slice_to_common_leaf_scalar(&mut components, consensus_scalar)?;
                 let ty = ctx.ensure_type_exists(crate::TypeInner::Matrix {
@@ -558,11 +567,11 @@ impl<'source> Lowerer<'source, '_> {
             ) => {
                 let component_ty = &ctx.typifier()[component];
                 let from_type = ctx.type_resolution_to_string(component_ty);
-                return Err(Box::new(Error::BadTypeCast {
+                return Err(vec![Box::new(Error::BadTypeCast {
                     span,
                     from_type,
                     to_type: constructor.to_error_string(ctx),
-                }));
+                })]);
             }
 
             // Too many parameters for scalar constructor
@@ -571,11 +580,11 @@ impl<'source> Lowerer<'source, '_> {
                 Constructor::Type((_, &crate::TypeInner::Scalar { .. })),
             ) => {
                 let span = spans[1].until(spans.last().unwrap());
-                return Err(Box::new(Error::UnexpectedComponents(span)));
+                return Err(vec![Box::new(Error::UnexpectedComponents(span))]);
             }
 
             // Other types can't be constructed
-            _ => return Err(Box::new(Error::TypeNotConstructible(ty_span))),
+            _ => return Err(vec![Box::new(Error::TypeNotConstructible(ty_span))]),
         }
 
         let expr = ctx.append_expression(expr, span)?;
@@ -609,7 +618,7 @@ impl<'source> Lowerer<'source, '_> {
                 let ty = self.resolve_ast_type(ty, &mut ctx.as_const())?;
                 let scalar = match ctx.module.types[ty].inner {
                     crate::TypeInner::Scalar(sc) => sc,
-                    _ => return Err(Box::new(Error::UnknownScalarType(ty_span))),
+                    _ => return Err(vec![Box::new(Error::UnknownScalarType(ty_span))]),
                 };
                 let ty = ctx.ensure_type_exists(crate::TypeInner::Vector { size, scalar });
                 Constructor::Type(ty)
@@ -626,7 +635,7 @@ impl<'source> Lowerer<'source, '_> {
                 let ty = self.resolve_ast_type(ty, &mut ctx.as_const())?;
                 let scalar = match ctx.module.types[ty].inner {
                     crate::TypeInner::Scalar(sc) => sc,
-                    _ => return Err(Box::new(Error::UnknownScalarType(ty_span))),
+                    _ => return Err(vec![Box::new(Error::UnknownScalarType(ty_span))]),
                 };
                 let ty = match scalar.kind {
                     crate::ScalarKind::Float => ctx.ensure_type_exists(crate::TypeInner::Matrix {
@@ -634,7 +643,7 @@ impl<'source> Lowerer<'source, '_> {
                         rows,
                         scalar,
                     }),
-                    _ => return Err(Box::new(Error::BadMatrixScalarKind(ty_span, scalar))),
+                    _ => return Err(vec![Box::new(Error::BadMatrixScalarKind(ty_span, scalar))]),
                 };
                 Constructor::Type(ty)
             }

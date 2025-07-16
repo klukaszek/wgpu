@@ -1,18 +1,20 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 use directive::enable_extension::ImplementedEnableExtension;
 
 use crate::diagnostic_filter::{
     self, DiagnosticFilter, DiagnosticFilterMap, DiagnosticFilterNode, FilterableTriggeringRule,
     ShouldConflictOnFullDuplicate, StandardFilterableTriggeringRule,
 };
+use crate::front::SymbolTable;
 use crate::front::wgsl::error::{DiagnosticAttributeNotSupportedPosition, Error, ExpectedToken};
+use crate::front::wgsl::parse::directive::DirectiveKind;
 use crate::front::wgsl::parse::directive::enable_extension::{EnableExtension, EnableExtensions};
 use crate::front::wgsl::parse::directive::language_extension::LanguageExtension;
-use crate::front::wgsl::parse::directive::DirectiveKind;
 use crate::front::wgsl::parse::lexer::{Lexer, Token};
 use crate::front::wgsl::parse::number::Number;
 use crate::front::wgsl::{Result, Scalar};
-use crate::front::SymbolTable;
 use crate::{Arena, FastHashSet, FastIndexSet, Handle, ShaderStage, Span};
 
 pub mod ast;
@@ -112,10 +114,10 @@ impl<'a> ExpressionContext<'a, '_, '_> {
     fn declare_local(&mut self, name: ast::Ident<'a>) -> Result<'a, Handle<ast::Local>> {
         let handle = self.locals.append(ast::Local, name.span);
         if let Some(old) = self.local_table.add(name.name, handle) {
-            Err(Box::new(Error::Redefinition {
+            Err(vec![Box::new(Error::Redefinition {
                 previous: self.locals.get_span(old),
                 current: name.span,
-            }))
+            })])
         } else {
             Ok(handle)
         }
@@ -163,7 +165,7 @@ impl<T> Default for ParsedAttribute<T> {
 impl<T> ParsedAttribute<T> {
     fn set(&mut self, value: T, name_span: Span) -> Result<'static, ()> {
         if self.value.is_some() {
-            return Err(Box::new(Error::RepeatedAttribute(name_span)));
+            return Err(vec![Box::new(Error::RepeatedAttribute(name_span))]);
         }
         self.value = Some(value);
         Ok(())
@@ -226,10 +228,10 @@ impl<'a> BindingParser<'a> {
                     .enable_extensions
                     .contains(ImplementedEnableExtension::DualSourceBlending)
                 {
-                    return Err(Box::new(Error::EnableExtensionNotEnabled {
+                    return Err(vec![Box::new(Error::EnableExtensionNotEnabled {
                         span: name_span,
                         kind: ImplementedEnableExtension::DualSourceBlending.into(),
-                    }));
+                    })]);
                 }
 
                 lexer.expect(Token::Paren('('))?;
@@ -237,7 +239,7 @@ impl<'a> BindingParser<'a> {
                     .set(parser.general_expression(lexer, ctx)?, name_span)?;
                 lexer.expect(Token::Paren(')'))?;
             }
-            _ => return Err(Box::new(Error::UnknownAttribute(name_span))),
+            _ => return Err(vec![Box::new(Error::UnknownAttribute(name_span))]),
         }
         Ok(())
     }
@@ -272,7 +274,7 @@ impl<'a> BindingParser<'a> {
             (None, Some(built_in), None, None, false, None) => {
                 Ok(Some(ast::Binding::BuiltIn(built_in)))
             }
-            (_, _, _, _, _, _) => Err(Box::new(Error::InconsistentBinding(span))),
+            (_, _, _, _, _, _) => Err(vec![Box::new(Error::InconsistentBinding(span))]),
         }
     }
 }
@@ -340,7 +342,9 @@ impl Parser {
     {
         self.recursion_depth += 1;
         if self.recursion_depth >= 256 {
-            return Err(Box::new(Error::Internal("Parser recursion limit exceeded")));
+            return Err(vec![Box::new(Error::Internal(
+                "Parser recursion limit exceeded",
+            ))]);
         }
         let ret = f(self);
         self.recursion_depth -= 1;
@@ -392,28 +396,28 @@ impl Parser {
                     size: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::I32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec2u" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::U32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec2f" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec2h" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec3" => ast::ConstructorType::PartialVector {
                 size: crate::VectorSize::Tri,
@@ -423,28 +427,28 @@ impl Parser {
                     size: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::I32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec3u" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::U32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec3f" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec3h" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec4" => ast::ConstructorType::PartialVector {
                 size: crate::VectorSize::Quad,
@@ -454,28 +458,28 @@ impl Parser {
                     size: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::I32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec4u" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::U32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec4f" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "vec4h" => {
                 return Ok(Some(ast::ConstructorType::Vector {
                     size: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x2" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Bi,
@@ -487,7 +491,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x2h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -495,7 +499,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x3" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Bi,
@@ -507,7 +511,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x3h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -515,7 +519,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x4" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Bi,
@@ -527,7 +531,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat2x4h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -535,7 +539,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x2" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Tri,
@@ -547,7 +551,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x2h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -555,7 +559,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x3" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Tri,
@@ -567,7 +571,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x3h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -575,7 +579,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x4" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Tri,
@@ -587,7 +591,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat3x4h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -595,7 +599,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x2" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Quad,
@@ -607,7 +611,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x2h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -615,7 +619,7 @@ impl Parser {
                     rows: crate::VectorSize::Bi,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x3" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Quad,
@@ -627,7 +631,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x3h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -635,7 +639,7 @@ impl Parser {
                     rows: crate::VectorSize::Tri,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x4" => ast::ConstructorType::PartialMatrix {
                 columns: crate::VectorSize::Quad,
@@ -647,7 +651,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F32),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "mat4x4h" => {
                 return Ok(Some(ast::ConstructorType::Matrix {
@@ -655,7 +659,7 @@ impl Parser {
                     rows: crate::VectorSize::Quad,
                     ty: ctx.new_scalar(Scalar::F16),
                     ty_span: Span::UNDEFINED,
-                }))
+                }));
             }
             "array" => ast::ConstructorType::PartialArray,
             "atomic"
@@ -680,7 +684,9 @@ impl Parser {
             | "texture_storage_1d_array"
             | "texture_storage_2d"
             | "texture_storage_2d_array"
-            | "texture_storage_3d" => return Err(Box::new(Error::TypeNotConstructible(span))),
+            | "texture_storage_3d" => {
+                return Err(vec![Box::new(Error::TypeNotConstructible(span))]);
+            }
             _ => return Ok(None),
         };
 
@@ -852,14 +858,14 @@ impl Parser {
             }
             (Token::Number(res), span) => {
                 let _ = lexer.next();
-                let num = res.map_err(|err| Error::BadNumber(span, err))?;
+                let num = res.map_err(|err| vec![Box::new(Error::BadNumber(span, err))])?;
 
                 if let Some(enable_extension) = num.requires_enable_extension() {
                     if !lexer.enable_extensions.contains(enable_extension) {
-                        return Err(Box::new(Error::EnableExtensionNotEnabled {
+                        return Err(vec![Box::new(Error::EnableExtensionNotEnabled {
                             kind: enable_extension.into(),
                             span,
-                        }));
+                        })]);
                     }
                 }
 
@@ -949,10 +955,10 @@ impl Parser {
                 }
             }
             other => {
-                return Err(Box::new(Error::Unexpected(
+                return Err(vec![Box::new(Error::Unexpected(
                     other.1,
                     ExpectedToken::PrimaryExpression,
-                )))
+                ))]);
             }
         };
 
@@ -1359,10 +1365,10 @@ impl Parser {
         let mut ready = true;
         while !lexer.skip(Token::Paren('}')) {
             if !ready {
-                return Err(Box::new(Error::Unexpected(
+                return Err(vec![Box::new(Error::Unexpected(
                     lexer.next().1,
                     ExpectedToken::Token(Token::Separator(',')),
-                )));
+                ))]);
             }
 
             let doc_comments = lexer.accumulate_doc_comments();
@@ -1406,14 +1412,14 @@ impl Parser {
             });
 
             if !member_names.insert(name.name) {
-                return Err(Box::new(Error::Redefinition {
+                return Err(vec![Box::new(Error::Redefinition {
                     previous: members
                         .iter()
                         .find(|x| x.name.name == name.name)
                         .map(|x| x.name.span)
                         .unwrap(),
                     current: name.span,
-                }));
+                })]);
             }
         }
 
@@ -1933,7 +1939,7 @@ impl Parser {
                 kind: Uint,
                 width: 8,
             } => Ok(()),
-            _ => Err(Box::new(Error::BadTextureSampleType { span, scalar })),
+            _ => Err(vec![Box::new(Error::BadTextureSampleType { span, scalar })]),
         }
     }
 
@@ -2015,7 +2021,12 @@ impl Parser {
                 });
                 return Ok(());
             }
-            _ => return Err(Box::new(Error::Unexpected(op.1, ExpectedToken::Assignment))),
+            _ => {
+                return Err(vec![Box::new(Error::Unexpected(
+                    op.1,
+                    ExpectedToken::Assignment,
+                ))]);
+            }
         };
 
         let span = lexer.span_from(span_start);
@@ -2313,10 +2324,10 @@ impl Parser {
                                     }
                                     (Token::Paren('}'), _) => break,
                                     (_, span) => {
-                                        return Err(Box::new(Error::Unexpected(
+                                        return Err(vec![Box::new(Error::Unexpected(
                                             span,
                                             ExpectedToken::SwitchItem,
-                                        )))
+                                        ))]);
                                     }
                                 }
                             }
@@ -2379,9 +2390,9 @@ impl Parser {
                                         | ast::StatementKind::Assign { .. }
                                         | ast::StatementKind::LocalDecl(_) => {}
                                         _ => {
-                                            return Err(Box::new(Error::InvalidForInitializer(
-                                                span,
-                                            )))
+                                            return Err(vec![Box::new(
+                                                Error::InvalidForInitializer(span),
+                                            )]);
                                         }
                                     }
                                 }
@@ -2442,7 +2453,7 @@ impl Parser {
                             let (peeked_token, peeked_span) = lexer.peek();
                             if let Token::Word("if") = peeked_token {
                                 let span = span.until(&peeked_span);
-                                return Err(Box::new(Error::InvalidBreakIf(span)));
+                                return Err(vec![Box::new(Error::InvalidBreakIf(span))]);
                             }
                             lexer.expect(Token::Separator(';'))?;
                             ast::StatementKind::Break
@@ -2593,23 +2604,23 @@ impl Parser {
                 let span = self.peek_rule_span(lexer);
                 diagnostic_filters
                     .add(filter, span, ShouldConflictOnFullDuplicate::Yes)
-                    .map_err(|e| Box::new(e.into()))?;
+                    .map_err(|e| vec![Box::new(e.into())])?;
             } else {
-                return Err(Box::new(Error::Unexpected(
+                return Err(vec![Box::new(Error::Unexpected(
                     name_span,
                     ExpectedToken::DiagnosticAttribute,
-                )));
+                ))]);
             }
         }
         self.pop_rule_span(lexer);
 
         if !diagnostic_filters.is_empty() {
-            return Err(Box::new(
+            return Err(vec![Box::new(
                 Error::DiagnosticAttributeNotYetImplementedAtParseSite {
                     site_name_plural: "compound statements",
                     spans: diagnostic_filters.spans().collect(),
                 },
-            ));
+            )]);
         }
 
         let brace_span = lexer.expect_span(Token::Paren('{'))?;
@@ -2673,10 +2684,10 @@ impl Parser {
         let mut ready = true;
         while !lexer.skip(Token::Paren(')')) {
             if !ready {
-                return Err(Box::new(Error::Unexpected(
+                return Err(vec![Box::new(Error::Unexpected(
                     lexer.next().1,
                     ExpectedToken::Token(Token::Separator(',')),
-                )));
+                ))]);
             }
             let binding = self.varying_binding(lexer, &mut ctx)?;
 
@@ -2705,10 +2716,10 @@ impl Parser {
                 must_use,
             })
         } else if let Some(must_use) = must_use {
-            return Err(Box::new(Error::FunctionMustUseReturnsVoid(
+            return Err(vec![Box::new(Error::FunctionMustUseReturnsVoid(
                 must_use,
                 self.peek_rule_span(lexer),
-            )));
+            ))]);
         } else {
             None
         };
@@ -2761,7 +2772,7 @@ impl Parser {
             };
 
             if !matches!(lexer.next().0, Token::Separator(';')) {
-                return Err(Box::new(Error::Unexpected(span, expected_token)));
+                return Err(vec![Box::new(Error::Unexpected(span, expected_token))]);
             }
 
             break Ok(());
@@ -2800,10 +2811,10 @@ impl Parser {
             if filters.is_empty() {
                 Ok(())
             } else {
-                Err(Box::new(Error::DiagnosticAttributeNotSupported {
+                Err(vec![Box::new(Error::DiagnosticAttributeNotSupported {
                     on_what,
                     spans: filters.spans().collect(),
-                }))
+                })])
             }
         };
 
@@ -2815,7 +2826,7 @@ impl Parser {
                 let span = self.peek_rule_span(lexer);
                 diagnostic_filters
                     .add(filter, span, ShouldConflictOnFullDuplicate::Yes)
-                    .map_err(|e| Box::new(e.into()))?;
+                    .map_err(|e| vec![Box::new(e.into())])?;
                 continue;
             }
             match name {
@@ -2853,10 +2864,10 @@ impl Parser {
                             (Token::Paren(')'), _) => break,
                             (Token::Separator(','), _) if i != 2 => (),
                             other => {
-                                return Err(Box::new(Error::Unexpected(
+                                return Err(vec![Box::new(Error::Unexpected(
                                     other.1,
                                     ExpectedToken::WorkgroupSizeSeparator,
-                                )))
+                                ))]);
                             }
                         }
                     }
@@ -2878,7 +2889,7 @@ impl Parser {
                 "must_use" => {
                     must_use.set(name_span, name_span)?;
                 }
-                _ => return Err(Box::new(Error::UnknownAttribute(name_span))),
+                _ => return Err(vec![Box::new(Error::UnknownAttribute(name_span))]),
             }
         }
 
@@ -2891,9 +2902,17 @@ impl Parser {
                 });
             }
             (Some(_), None) => {
-                return Err(Box::new(Error::MissingAttribute("binding", attrib_span)))
+                return Err(vec![Box::new(Error::MissingAttribute(
+                    "binding",
+                    attrib_span,
+                ))]);
             }
-            (None, Some(_)) => return Err(Box::new(Error::MissingAttribute("group", attrib_span))),
+            (None, Some(_)) => {
+                return Err(vec![Box::new(Error::MissingAttribute(
+                    "group",
+                    attrib_span,
+                ))]);
+            }
             (None, None) => {}
         }
 
@@ -2908,9 +2927,9 @@ impl Parser {
                 None
             }
             (Token::Word(word), directive_span) if DirectiveKind::from_ident(word).is_some() => {
-                return Err(Box::new(Error::DirectiveAfterFirstGlobalDecl {
+                return Err(vec![Box::new(Error::DirectiveAfterFirstGlobalDecl {
                     directive_span,
-                }));
+                })]);
             }
             (Token::Word("struct"), _) => {
                 ensure_no_diag_attrs("`struct`s".into(), diagnostic_filters)?;
@@ -3009,7 +3028,7 @@ impl Parser {
                 Some(ast::GlobalDeclKind::Fn(ast::Function {
                     entry_point: if let Some(stage) = stage.value {
                         if stage == ShaderStage::Compute && workgroup_size.value.is_none() {
-                            return Err(Box::new(Error::MissingWorkgroupSize(compute_span)));
+                            return Err(vec![Box::new(Error::MissingWorkgroupSize(compute_span))]);
                         }
                         Some(ast::EntryPoint {
                             stage,
@@ -3039,10 +3058,10 @@ impl Parser {
             }
             (Token::End, _) => return Ok(()),
             other => {
-                return Err(Box::new(Error::Unexpected(
+                return Err(vec![Box::new(Error::Unexpected(
                     other.1,
                     ExpectedToken::GlobalItem,
-                )))
+                ))]);
             }
         };
 
@@ -3056,14 +3075,14 @@ impl Parser {
         if !self.rules.is_empty() {
             log::error!("Reached the end of global decl, but rule stack is not empty");
             log::error!("Rules: {:?}", self.rules);
-            return Err(Box::new(Error::Internal("rule stack is not empty")));
+            return Err(vec![Box::new(Error::Internal("rule stack is not empty"))]);
         };
 
         match binding {
             None => Ok(()),
-            Some(_) => Err(Box::new(Error::Internal(
+            Some(_) => Err(vec![Box::new(Error::Internal(
                 "we had the attribute but no var?",
-            ))),
+            ))]),
         }
     }
 
@@ -3071,7 +3090,7 @@ impl Parser {
         &mut self,
         source: &'a str,
         options: &Options,
-    ) -> Result<'a, ast::TranslationUnit<'a>> {
+    ) -> core::result::Result<ast::TranslationUnit<'a>, Vec<Box<Error<'a>>>> {
         self.reset();
 
         let mut lexer = Lexer::new(source, !options.parse_doc_comments);
@@ -3093,42 +3112,41 @@ impl Parser {
                         let span = self.peek_rule_span(&lexer);
                         diagnostic_filters
                             .add(diagnostic_filter, span, ShouldConflictOnFullDuplicate::No)
-                            .map_err(|e| Box::new(e.into()))?;
-                        lexer.expect(Token::Separator(';'))?;
+                            .map_err(|e| vec![Box::new(e.into())])?;
+                        lexer
+                            .expect(Token::Separator(';'))
+                            .map_err(|e| vec![Box::new(e)]);
                     }
                     DirectiveKind::Enable => {
                         self.directive_ident_list(&mut lexer, |ident, span| {
-                            let kind = EnableExtension::from_ident(ident, span)?;
-                            let extension = match kind {
-                                EnableExtension::Implemented(kind) => kind,
-                                EnableExtension::Unimplemented(kind) => {
-                                    return Err(Box::new(Error::EnableExtensionNotYetImplemented {
+                            match EnableExtension::from_ident(ident, span) {
+                                Ok(EnableExtension::Implemented(kind)) => {
+                                    enable_extensions.add(kind);
+                                    Ok(())
+                                }
+                                Ok(EnableExtension::Unimplemented(kind)) => {
+                                    Err(vec![Box::new(Error::EnableExtensionNotYetImplemented {
                                         kind,
                                         span,
-                                    }))
+                                    })])
                                 }
-                            };
-                            enable_extensions.add(extension);
-                            Ok(())
+                                Err(errors) => Err(errors),
+                            }
                         })?;
                     }
                     DirectiveKind::Requires => {
                         self.directive_ident_list(&mut lexer, |ident, span| {
                             match LanguageExtension::from_ident(ident) {
-                                Some(LanguageExtension::Implemented(_kind)) => {
-                                    // NOTE: No further validation is needed for an extension, so
-                                    // just throw parsed information away. If we ever want to apply
-                                    // what we've parsed to diagnostics, maybe we'll want to refer
-                                    // to enabled extensions later?
-                                    Ok(())
-                                }
+                                Some(LanguageExtension::Implemented(_kind)) => Ok(()),
                                 Some(LanguageExtension::Unimplemented(kind)) => {
-                                    Err(Box::new(Error::LanguageExtensionNotYetImplemented {
+                                    Err(vec![Box::new(Error::LanguageExtensionNotYetImplemented {
                                         kind,
                                         span,
-                                    }))
+                                    })])
                                 }
-                                None => Err(Box::new(Error::UnknownLanguageExtension(span, ident))),
+                                None => Err(vec![Box::new(Error::UnknownLanguageExtension(
+                                    span, ident,
+                                ))]),
                             }
                         })?;
                     }
@@ -3144,9 +3162,31 @@ impl Parser {
         tu.diagnostic_filter_leaf =
             Self::write_diagnostic_filters(&mut tu.diagnostic_filters, diagnostic_filters, None);
 
+        let mut errors = Vec::new();
         loop {
             match self.global_decl(&mut lexer, &mut tu) {
-                Err(error) => return Err(error),
+                Err(error) => {
+                    errors.push(error);
+                    // Synchronize: skip tokens until next global item or EOF
+                    while let (token, _) = lexer.peek() {
+                        match token {
+                            Token::Word("struct")
+                            | Token::Word("fn")
+                            | Token::Word("var")
+                            | Token::Word("const")
+                            | Token::Word("alias")
+                            | Token::Word("override")
+                            | Token::Word("const_assert")
+                            | Token::End => break,
+                            _ => {
+                                lexer.next();
+                            }
+                        }
+                    }
+                    if lexer.peek().0 == Token::End {
+                        break;
+                    }
+                }
                 Ok(()) => {
                     if lexer.peek().0 == Token::End {
                         break;
@@ -3154,8 +3194,11 @@ impl Parser {
                 }
             }
         }
-
-        Ok(tu)
+        if errors.is_empty() {
+            Ok(tu)
+        } else {
+            Err(errors.into_iter().flatten().collect())
+        }
     }
 
     fn increase_brace_nesting(brace_nesting_level: u8, brace_span: Span) -> Result<'static, u8> {
@@ -3168,10 +3211,10 @@ impl Parser {
         // > Maximum nesting depth of brace-enclosed statements in a function[:] 127
         const BRACE_NESTING_MAXIMUM: u8 = 127;
         if brace_nesting_level + 1 > BRACE_NESTING_MAXIMUM {
-            return Err(Box::new(Error::ExceededLimitForNestedBraces {
+            return Err(vec![Box::new(Error::ExceededLimitForNestedBraces {
                 span: brace_span,
                 limit: BRACE_NESTING_MAXIMUM,
-            }));
+            })]);
         }
         Ok(brace_nesting_level + 1)
     }
@@ -3181,8 +3224,10 @@ impl Parser {
 
         let (severity_control_name, severity_control_name_span) = lexer.next_ident_with_span()?;
         let new_severity = diagnostic_filter::Severity::from_wgsl_ident(severity_control_name)
-            .ok_or(Error::DiagnosticInvalidSeverity {
-                severity_control_name_span,
+            .ok_or_else(|| {
+                vec![Box::new(Error::DiagnosticInvalidSeverity {
+                    severity_control_name_span,
+                })]
             })?;
 
         lexer.expect(Token::Separator(','))?;
@@ -3199,10 +3244,12 @@ impl Parser {
             {
                 FilterableTriggeringRule::Standard(triggering_rule)
             } else {
-                diagnostic_filter::Severity::Warning.report_wgsl_parse_diag(
-                    Box::new(Error::UnknownDiagnosticRuleName(diagnostic_rule_name_span)),
-                    lexer.source,
-                )?;
+                diagnostic_filter::Severity::Warning
+                    .report_wgsl_parse_diag(
+                        Box::new(Error::UnknownDiagnosticRuleName(diagnostic_rule_name_span)),
+                        lexer.source,
+                    )
+                    .map_err(|e| vec![Box::new(e)]);
                 FilterableTriggeringRule::Unknown(diagnostic_rule_name.into())
             }
         };
@@ -3211,7 +3258,9 @@ impl Parser {
             new_severity,
         };
         lexer.skip(Token::Separator(','));
-        lexer.expect(Token::Paren(')'))?;
+        lexer
+            .expect(Token::Paren(')'))
+            .map_err(|e| vec![Box::new(e)]);
 
         Ok(filter)
     }

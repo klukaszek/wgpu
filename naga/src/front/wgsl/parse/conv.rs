@@ -1,10 +1,11 @@
+use crate::Span;
 use crate::front::wgsl::parse::directive::enable_extension::{
     EnableExtensions, ImplementedEnableExtension,
 };
 use crate::front::wgsl::{Error, Result, Scalar};
-use crate::Span;
 
 use alloc::boxed::Box;
+use alloc::vec;
 
 pub fn map_address_space(word: &str, span: Span) -> Result<'_, crate::AddressSpace> {
     match word {
@@ -16,7 +17,7 @@ pub fn map_address_space(word: &str, span: Span) -> Result<'_, crate::AddressSpa
         }),
         "push_constant" => Ok(crate::AddressSpace::PushConstant),
         "function" => Ok(crate::AddressSpace::Function),
-        _ => Err(Box::new(Error::UnknownAddressSpace(span))),
+        _ => Err(vec![Box::new(Error::UnknownAddressSpace(span))]),
     }
 }
 
@@ -49,15 +50,15 @@ pub fn map_built_in(
         "subgroup_id" => crate::BuiltIn::SubgroupId,
         "subgroup_size" => crate::BuiltIn::SubgroupSize,
         "subgroup_invocation_id" => crate::BuiltIn::SubgroupInvocationId,
-        _ => return Err(Box::new(Error::UnknownBuiltin(span))),
+        _ => return Err(vec![Box::new(Error::UnknownBuiltin(span))]),
     };
     match built_in {
         crate::BuiltIn::ClipDistance => {
             if !enable_extensions.contains(ImplementedEnableExtension::ClipDistances) {
-                return Err(Box::new(Error::EnableExtensionNotEnabled {
-                    span,
+                return Err(vec![Box::new(Error::EnableExtensionNotEnabled {
                     kind: ImplementedEnableExtension::ClipDistances.into(),
-                }));
+                    span,
+                })]);
             }
         }
         _ => {}
@@ -70,7 +71,7 @@ pub fn map_interpolation(word: &str, span: Span) -> Result<'_, crate::Interpolat
         "linear" => Ok(crate::Interpolation::Linear),
         "flat" => Ok(crate::Interpolation::Flat),
         "perspective" => Ok(crate::Interpolation::Perspective),
-        _ => Err(Box::new(Error::UnknownAttribute(span))),
+        _ => Err(vec![Box::new(Error::UnknownAttribute(span))]),
     }
 }
 
@@ -81,7 +82,7 @@ pub fn map_sampling(word: &str, span: Span) -> Result<'_, crate::Sampling> {
         "sample" => Ok(crate::Sampling::Sample),
         "first" => Ok(crate::Sampling::First),
         "either" => Ok(crate::Sampling::Either),
-        _ => Err(Box::new(Error::UnknownAttribute(span))),
+        _ => Err(vec![Box::new(Error::UnknownAttribute(span))]),
     }
 }
 
@@ -129,7 +130,7 @@ pub fn map_storage_format(word: &str, span: Span) -> Result<'_, crate::StorageFo
         "rgba32sint" => Sf::Rgba32Sint,
         "rgba32float" => Sf::Rgba32Float,
         "bgra8unorm" => Sf::Bgra8Unorm,
-        _ => return Err(Box::new(Error::UnknownStorageFormat(span))),
+        _ => return Err(vec![Box::new(Error::UnknownStorageFormat(span))]),
     })
 }
 
@@ -178,10 +179,10 @@ pub fn get_scalar_type(
     if matches!(scalar, Some(Scalar::F16))
         && !enable_extensions.contains(ImplementedEnableExtension::F16)
     {
-        return Err(Box::new(Error::EnableExtensionNotEnabled {
+        return Err(vec![Box::new(Error::EnableExtensionNotEnabled {
             span,
             kind: ImplementedEnableExtension::F16.into(),
-        }));
+        })]);
     }
 
     Ok(scalar)
@@ -310,7 +311,7 @@ pub fn map_conservative_depth(word: &str, span: Span) -> Result<'_, crate::Conse
         "greater_equal" => Ok(Cd::GreaterEqual),
         "less_equal" => Ok(Cd::LessEqual),
         "unchanged" => Ok(Cd::Unchanged),
-        _ => Err(Box::new(Error::UnknownConservativeDepth(span))),
+        _ => Err(vec![Box::new(Error::UnknownConservativeDepth(span))]),
     }
 }
 
